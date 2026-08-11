@@ -1,0 +1,172 @@
+#define BLYNK_TEMPLATE_ID "TMPL3956Ysj11"
+#define BLYNK_TEMPLATE_NAME "SentinalX"
+
+#define BLYNK_PRINT Serial
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Servo.h>
+
+// -------- BLYNK --------
+char auth[] = "ZzOkFIy_5RYmcbPkkHlO8iX3B4IZHb0D";
+char ssid[] = "vivo 1904";
+char pass[] = "11302005";
+
+// -------- PINS --------
+#define TRIG_PIN D5
+#define ECHO_PIN D6
+#define PIR_PIN  D7
+#define SERVO_PIN D0
+
+#define IN1 D1
+#define IN2 D2
+#define IN3 D3
+#define IN4 D4
+
+#define VOLTAGE_PIN A0
+
+// -------- SETTINGS --------
+#define DIST_THRESHOLD 20     // obstacle stop
+#define INTRUDER_DIST 100     // intrusion range
+#define LOW_BATTERY 6.5       // volts
+
+Servo radarServo;
+BlynkTimer timer;
+
+long duration;
+int distance;
+
+// -------- SETUP --------
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(PIR_PIN, INPUT);
+
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  radarServo.attach(SERVO_PIN);
+
+  Serial.println("System Initializing...");
+  delay(30000); // PIR warmup
+  Serial.println("System Ready!");
+
+  Blynk.begin(auth, ssid, pass);
+
+  timer.setInterval(1000L, sendBattery);
+}
+
+// -------- LOOP --------
+void loop() {
+  Blynk.run();
+  timer.run();
+
+  scanServo();
+
+  distance = getDistance();
+
+  Serial.print("Distance: ");
+  Serial.println(distance);
+
+  // -------- MOTOR OBSTACLE LOGIC --------
+  if (distance > 0 && distance < DIST_THRESHOLD) {
+    stopMotors();
+    Serial.println("STOP - Obstacle");
+  } else {
+    moveForward();
+    Serial.println("Moving Forward");
+  }
+
+  // -------- INTRUSION LOGIC --------
+  if (digitalRead(PIR_PIN) == HIGH) {
+
+    if (distance > 0 && distance < INTRUDER_DIST) {
+
+      Serial.println("INTRUDER DETECTED");
+
+      Blynk.virtualWrite(V1, 1); // LED ON
+      Blynk.logEvent("alert", "Intruder detected!");
+
+      delay(2000);
+    }
+  } else {
+    Blynk.virtualWrite(V1, 0);
+  }
+
+  delay(200);
+}
+
+// -------- SERVO --------
+void scanServo() {
+  for (int angle = 60; angle <= 120; angle += 10) {
+    radarServo.write(angle);
+    delay(100);
+  }
+}
+
+// -------- ULTRASONIC --------
+int getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  if (duration == 0) return -1;
+
+  return duration * 0.034 / 2;
+}
+
+// -------- MOTOR FUNCTIONS --------
+void moveForward() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void stopMotors() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+// -------- VOLTAGE --------
+float getVoltage() {
+  int raw = analogRead(VOLTAGE_PIN);
+  float voltage = raw * (3.3 / 1023.0);
+  return voltage * 5;
+}
+
+// -------- BATTERY --------
+void sendBattery() {
+  float voltage = getVoltage();
+
+  Serial.print("Battery: ");
+  Serial.println(voltage);
+
+  Blynk.virtualWrite(V0, voltage); // gauge + chart
+
+  if (voltage < LOW_BATTERY) {
+
+    Serial.println("LOW BATTERY");
+
+    Blynk.virtualWrite(V2, 1); // alarm ON
+    Blynk.logEvent("alert", "Battery Low!");
+
+    stopMotors(); // optional safety
+
+  } else {
+    Blynk.virtualWrite(V2, 0);
+  }
+}
